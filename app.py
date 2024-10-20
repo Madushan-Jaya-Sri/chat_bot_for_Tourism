@@ -5,18 +5,18 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from openai import OpenAI
+from dotenv import load_dotenv
 
-api_key = os.getenv('OPENAI_KEY')
-client = OpenAI(api_key=api_key)
+# Load environment variables from .env file
+load_dotenv()
 
-# Function to get OpenAI API key
-def get_openai_api_key():
-    api_key = os.getenv('OPENAI_API_KEY')
-    if not api_key:
-        api_key = st.text_input("Enter your OpenAI API key:", type="password")
-        if api_key:
-            os.environ['OPENAI_API_KEY'] = api_key
-    return api_key
+# Get API key from environment
+openai_api_key = os.getenv('OPENAI_API_KEY')
+
+if not openai_api_key:
+    st.error("API key is not found. Please set it in the .env file.")
+
+client = OpenAI(api_key=openai_api_key)
 
 # Function to extract text from PDF
 def extract_text_from_pdf(pdf_file):
@@ -42,11 +42,13 @@ def create_vector_store(text):
 # Function to query GPT-4
 def query_gpt4(query, context):
     try:
-        response = client.chat.completions.create(model="gpt-4",
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant that answers questions about tourism industry reports. Use the provided context to answer the question."},
-            {"role": "user", "content": f"Context: {context}\n\nQuestion: {query}"}
-        ])
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that answers questions about tourism industry reports. Use the provided context to answer the question."},
+                {"role": "user", "content": f"Context: {context}\n\nQuestion: {query}"}
+            ]
+        )
         return response.choices[0].message.content
     except Exception as e:
         st.error(f"Error querying GPT-4: {str(e)}")
@@ -70,23 +72,20 @@ def main():
             border-radius: 10px;
             text-align: center;
         }
-        /* Change the font color of all other text to dark gray */
-        body, .stTextInput, .stButton, .stFileUploader, .stMarkdown, .st-emotion-cache-uef7qa, .st-emotion-cache-m78myu {
+        body, .stTextInput, .stButton, .stFileUploader, .stMarkdown {
             color: #4D4D4D;
-            font-weight: bold; /* Dark gray color */
+            font-weight: bold;
         }
-        /* Change the label for OpenAI API key input to black */
         label {
             color: black;
         }
-        /* Change subheader color to dark green */
         .subheader {
             background-color: lightgray;
             color: black;
             font-weight: bold;
             font-size:15px;
-             padding: 10px;
-             border-radius: 8px;
+            padding: 10px;
+            border-radius: 8px;
         }
         </style>
         """,
@@ -94,12 +93,6 @@ def main():
     )
 
     st.markdown("<h1 class='title'>Advanced Tourism Industry Chatbot</h1>", unsafe_allow_html=True)
-
-    # Get OpenAI API key
-    api_key = get_openai_api_key()
-    if not api_key:
-        st.warning("Please enter your OpenAI API key to use this application.")
-        return
 
     uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
 
@@ -111,7 +104,6 @@ def main():
         vector_store = create_vector_store(text)
 
         if vector_store:
-            # Save vector store in session state
             st.session_state['vector_store'] = vector_store
             st.success("PDF processed successfully!")
 
@@ -122,13 +114,27 @@ def main():
 
     if query and 'vector_store' in st.session_state:
         # Retrieve relevant documents
-        docs = st.session_state['vector_store'].similarity_search(query, k=3)
+        docs = st.session_state['vector_store'].similarity_search(query, k=5)
         context = "\n".join([doc.page_content for doc in docs])
+
+        # Show retrieved chunks in the sidebar
+        st.sidebar.markdown("<h2>Extracted Sections</h2>", unsafe_allow_html=True)
+        for i, doc in enumerate(docs):
+            st.sidebar.markdown(f"**Chunk {i + 1}:**")
+            st.sidebar.write(doc.page_content[:200] + "...")  # Show the first 200 characters of each chunk
 
         # Query GPT-4
         response = query_gpt4(query, context)
         if response:
-            st.write("Answer:", response)
+            st.markdown(
+                f"""
+                <div style='background-color: #f9f9f9; padding: 10px; border-radius: 10px;'>
+                    <h3 style='color: #6e654c;'>Answer:</h3>
+                    <p style='color: #6e654c;'>{response}</p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
 if __name__ == "__main__":
     main()
