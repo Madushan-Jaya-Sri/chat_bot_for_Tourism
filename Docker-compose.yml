@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    volumes:
+      - ./app:/app/app
+      - ./app/static/uploads:/app/app/static/uploads
+    env_file:
+      - .env
+    expose:
+      - 8000
+    depends_on:
+      - nginx
+
+  nginx:
+    build: ./nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./app/static:/app/static
+    depends_on:
+      - web

@@ -1,4 +1,5 @@
 import os
+import tempfile
 import PyPDF2
 import pdfplumber
 import pytesseract
@@ -6,208 +7,271 @@ from PIL import Image
 import streamlit as st
 import pandas as pd
 import re
+from pathlib import Path
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from openai import OpenAI
 from dotenv import load_dotenv
+from typing import List, Tuple, Dict, Optional
+import logging
 
-# Load environment variables from .env file
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Load environment variables and initialize OpenAI client
 load_dotenv()
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
-# Get API key from environment
-openai_api_key = os.getenv('OPENAI_API_KEY')
+if not OPENAI_API_KEY:
+    raise ValueError("OPENAI_API_KEY not found in environment variables")
 
-if not openai_api_key:
-    st.error("API key is not found. Please set it in the .env file.")
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-client = OpenAI(api_key=openai_api_key)
+# Create temporary directory for images
+TEMP_DIR = Path(tempfile.mkdtemp())
+TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-# Function to extract text, images, and tables from PDF
-def extract_data_from_pdf(pdf_file):
-    text = ""
-    tables = []
-    images = []
+class PDFProcessor:
+    @staticmethod
+    def extract_data_from_pdf(pdf_file) -> Tuple[str, List[List], List[str]]:
+        """
+        Extract text, tables, and images from a PDF file.
+        Returns tuple of (text, tables, image_paths)
+        """
+        try:
+            text = ""
+            tables = []
+            image_paths = []
 
-    # Using pdfplumber for better text and table extraction
-    with pdfplumber.open(pdf_file) as pdf:
-        for page in pdf.pages:
-            text += page.extract_text() or ""
-            tables.extend(page.extract_tables())
-            for i, image in enumerate(page.images):
-                # Convert the image to a PIL Image
-                img = page.to_image()
-                img_path = f"images/page_{page.page_number}_img_{i}.png"
-                img.save(img_path)
-                images.append(img_path)
+            with pdfplumber.open(pdf_file) as pdf:
+                for page_num, page in enumerate(pdf.pages):
+                    # Extract text
+                    text += page.extract_text() or ""
+                    
+                    # Extract tables
+                    page_tables = page.extract_tables()
+                    if page_tables:
+                        tables.extend(page_tables)
+                    
+                    # Extract and save images
+                    for img_num, image in enumerate(page.images):
+                        img = page.to_image()
+                        img_path = TEMP_DIR / f"page_{page_num}_img_{img_num}.png"
+                        img.save(str(img_path))
+                        image_paths.append(str(img_path))
 
-    return text, tables, images
+            return text, tables, image_paths
+        except Exception as e:
+            logger.error(f"Error extracting data from PDF: {str(e)}")
+            raise
 
-# Function to analyze and extract text from images
-def analyze_images(image_paths):
-    image_descriptions = []
-    for img_path in image_paths:
-        img = Image.open(img_path)
-        text = pytesseract.image_to_string(img)
-        image_descriptions.append({"path": img_path, "text": text})
-    return image_descriptions
+class ImageAnalyzer:
+    @staticmethod
+    def analyze_images(image_paths: List[str]) -> List[Dict]:
+        """
+        Analyze images and extract text using OCR.
+        """
+        try:
+            image_descriptions = []
+            for img_path in image_paths:
+                img = Image.open(img_path)
+                text = pytesseract.image_to_string(img)
+                image_descriptions.append({
+                    "path": img_path,
+                    "text": text.strip()
+                })
+            return image_descriptions
+        except Exception as e:
+            logger.error(f"Error analyzing images: {str(e)}")
+            raise
 
-# Function to create a vector store from extracted data
-def create_vector_store(text, tables, images):
-    # Split text into chunks
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    texts = text_splitter.split_text(text)
-
-    # Create embeddings
-    embeddings = OpenAIEmbeddings()
-    vector_store = FAISS.from_texts(texts, embeddings)
-
-    # Create embeddings for tables and images
-    table_texts = [str(table) for table in tables]
-    table_embeddings = FAISS.from_texts(table_texts, embeddings)
-
-    image_texts = [desc['text'] for desc in images]
-    image_embeddings = FAISS.from_texts(image_texts, embeddings)
-
-    return vector_store, table_embeddings, image_embeddings
-
-# Function to query GPT-4
-def query_gpt4(query, context):
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that answers questions based on the provided context."},
-                {"role": "user", "content": f"Context: {context}\n\nQuestion: {query}"}
-            ]
+class VectorStoreCreator:
+    def __init__(self, openai_api_key: str):
+        self.embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
+        self.text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=200
         )
-        return response.choices[0].message.content
-    except Exception as e:
-        st.error(f"Error querying GPT-4: {str(e)}")
-        return None
 
-# Helper function to deduplicate and filter relevant information
-def deduplicate_and_filter(items, threshold=0.8):
-    unique_items = []
-    for item in items:
-        if not any(similar(item, unique_item, threshold) for unique_item in unique_items):
-            unique_items.append(item)
-    return unique_items
+    def create_vector_stores(self, text: str, tables: List[List], images: List[Dict]) -> Tuple[FAISS, Optional[FAISS], Optional[FAISS]]:
+        """
+        Create vector stores for text, tables, and images.
+        """
+        try:
+            # Process text
+            texts = self.text_splitter.split_text(text)
+            text_store = FAISS.from_texts(texts, self.embeddings)
 
-# Helper function to check similarity between two strings
-def similar(a, b, threshold=0.8):
-    return len(set(a.split()) & set(b.split())) / float(len(set(a.split()) | set(b.split()))) >= threshold
+            # Process tables
+            table_store = None
+            if tables:
+                table_texts = [str(table) for table in tables]
+                table_store = FAISS.from_texts(table_texts, self.embeddings)
 
-# Helper function to display text in the sidebar
-def display_text_in_sidebar(title, text):
-    with st.sidebar.expander(title):
-        st.write(text)
+            # Process images
+            image_store = None
+            if images:
+                image_texts = [img['text'] for img in images if img['text']]
+                if image_texts:
+                    image_store = FAISS.from_texts(image_texts, self.embeddings)
 
-# Helper function to display tables in the sidebar
-def display_table_in_sidebar(title, table):
-    with st.sidebar.expander(title):
-        st.table(table)
+            return text_store, table_store, image_store
+        except Exception as e:
+            logger.error(f"Error creating vector stores: {str(e)}")
+            raise
 
-# Helper function to display images in the sidebar
-def display_image_in_sidebar(title, image_path):
-    with st.sidebar.expander(title):
-        st.image(image_path)
-def format_answer_as_table(answer):
-    # Split the answer into lines
-    lines = answer.split('\n')
-    
-    # Detect if the answer contains bullet points with numerical data
-    if any(line.strip().startswith('•') for line in lines):
-        data = []
-        headers = ["Item", "Values"]
+class GPTQueryEngine:
+    @staticmethod
+    def query(query: str, context: str) -> Optional[str]:
+        """
+        Query GPT-4 with context and return response.
+        """
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant specializing in tourism industry analysis. Provide clear, accurate answers based on the provided context."},
+                    {"role": "user", "content": f"Context: {context}\n\nQuestion: {query}"}
+                ]
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"Error querying GPT-4: {str(e)}")
+            return None
+
+class DataFormatter:
+    @staticmethod
+    def format_answer_as_table(answer: str) -> None:
+        """
+        Format and display the answer as a table if applicable.
+        """
+        lines = answer.split('\n')
         
-        for line in lines:
-            if line.strip().startswith('•'):
-                # Remove the bullet point and split into item and values
-                parts = line.strip()[1:].split(':', 1)
-                if len(parts) == 2:
-                    item = parts[0].strip()
-                    values = parts[1].strip()
-                    # Split values if they contain multiple years/numbers
-                    value_parts = re.findall(r'[\d,]+(?:\.\d+)?', values)
-                    data.append([item] + value_parts)
-        
-        # Create a DataFrame
-        df = pd.DataFrame(data)
-        
-        # If we have data, return it as a Streamlit table
-        if not df.empty:
-            return st.table(df)
-    
-    # If no tabular data detected, return the original answer
-    return st.write(answer)
+        if any(line.strip().startswith('•') for line in lines):
+            data = []
+            for line in lines:
+                if line.strip().startswith('•'):
+                    parts = line.strip()[1:].split(':', 1)
+                    if len(parts) == 2:
+                        item = parts[0].strip()
+                        values = parts[1].strip()
+                        value_parts = re.findall(r'[\d,]+(?:\.\d+)?', values)
+                        data.append([item] + value_parts)
+            
+            if data:
+                df = pd.DataFrame(data)
+                st.table(df)
+            else:
+                st.write(answer)
+        else:
+            st.write(answer)
 
-# Main function for the Streamlit app
+def setup_streamlit_ui():
+    """
+    Configure Streamlit UI components.
+    """
+    st.markdown(
+        """
+        <style>
+        .stApp {
+            background-image: url("https://www.travelandtourworld.com/wp-content/uploads/2024/07/Compressed_Malaysia_Travel_Tourism_Under_300KB.jpg");
+            background-size: cover;
+        }
+        .title {
+            font-weight: bold;
+            color: black;
+            background-color: rgba(211, 211, 211, 0.9);
+            padding: 10px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        body, .stTextInput, .stButton, .stFileUploader, .stMarkdown {
+            color: #4D4D4D;
+            font-weight: bold;
+        }
+        label {
+            color: black;
+            background-color: rgba(255, 255, 255, 0.7);
+            padding: 5px;
+            border-radius: 5px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+    st.markdown("<h1 class='title'>Advanced Tourism Industry Chatbot</h1>", unsafe_allow_html=True)
+
 def main():
-    st.title("RAG System for Unstructured Data")
+    setup_streamlit_ui()
 
-    uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
+    st.markdown(
+        "<div><p style='color: #141414; font-weight: bold; background-color: rgba(255, 255, 255, 0.7); padding: 5px; border-radius: 5px;'>Choose a PDF file</p></div>",
+        unsafe_allow_html=True
+    )
+
+    uploaded_file = st.file_uploader("Upload your PDF file", type="pdf", label_visibility="collapsed")
 
     if uploaded_file is not None:
-        # Extract data from PDF
-        text, tables, images = extract_data_from_pdf(uploaded_file)
+        try:
+            # Initialize processors
+            pdf_processor = PDFProcessor()
+            image_analyzer = ImageAnalyzer()
+            vector_store_creator = VectorStoreCreator(OPENAI_API_KEY)
+            
+            # Process PDF
+            text, tables, image_paths = pdf_processor.extract_data_from_pdf(uploaded_file)
+            image_docs = image_analyzer.analyze_images(image_paths)
+            
+            # Create vector stores
+            vector_store, table_store, image_store = vector_store_creator.create_vector_stores(
+                text, tables, image_docs
+            )
 
-        # Extracting image documents
-        image_docs = analyze_images(images)
+            # Store in session state
+            st.session_state.update({
+                'vector_store': vector_store,
+                'table_store': table_store,
+                'image_store': image_store
+            })
+            
+            st.success("PDF processed successfully!")
 
-        # Create vector store
-        vector_store, table_embeddings, image_embeddings = create_vector_store(text, tables, image_docs)
+            # Query interface
+            query = st.text_input("Your question about the tourism document:", 
+                                help="Ask questions about the content of your PDF")
 
-        st.session_state['vector_store'] = vector_store
-        st.session_state['table_embeddings'] = table_embeddings
-        st.session_state['image_embeddings'] = image_embeddings
-        st.success("PDF processed successfully!")
+            if query:
+                # Retrieve relevant documents
+                docs = vector_store.similarity_search(query, k=3)
+                context = [doc.page_content for doc in docs]
 
-        # Chat interface
-        query = st.text_input("Your question about the PDF:")
+                if table_store:
+                    table_docs = table_store.similarity_search(query, k=2)
+                    context.extend(doc.page_content for doc in table_docs)
 
-        if query:
-            # Retrieve relevant documents from text vector store
-            docs = vector_store.similarity_search(query, k=3)
-            context_text = [doc.page_content for doc in docs]
+                if image_store:
+                    image_docs = image_store.similarity_search(query, k=2)
+                    context.extend(doc.page_content for doc in image_docs)
 
-            # Retrieve relevant tables
-            table_docs = table_embeddings.similarity_search(query, k=3)
-            context_tables = [eval(doc.page_content) for doc in table_docs]  # Assuming tables are stored as string representations of lists
+                # Get response from GPT
+                response = GPTQueryEngine.query(query, "\n".join(context))
+                
+                if response:
+                    st.markdown("**Answer:**")
+                    DataFormatter.format_answer_as_table(response)
 
-            # Retrieve relevant images
-            image_docs = image_embeddings.similarity_search(query, k=3)
-            context_images = [doc.metadata['image_path'] for doc in image_docs if 'image_path' in doc.metadata]
+                    # Display sources in sidebar
+                    with st.sidebar:
+                        st.header("Sources")
+                        for i, doc in enumerate(docs, 1):
+                            with st.expander(f"Source {i}"):
+                                st.write(doc.page_content)
 
-            # Deduplicate and filter relevant information
-            unique_text = deduplicate_and_filter(context_text)
-            unique_tables = context_tables  # Tables are likely unique, but you can implement a custom deduplication if needed
-            unique_images = deduplicate_and_filter(context_images)
-
-            # Compile all contexts
-            final_context = "\n".join(unique_text) + "\n" + str(unique_tables) + "\n" + "\n".join(unique_images)
-
-            # Query GPT-4
-            response = query_gpt4(query, final_context)
-            response = query_gpt4(query, final_context)
-            if response:
-                st.markdown("**Answer:**")
-                format_answer_as_table(response)
-
-            # Display retrieved information in the sidebar
-            st.sidebar.header("Retrieved Information")
-
-            # Display text
-            for i, text in enumerate(unique_text):
-                display_text_in_sidebar(f"Retrieved Text {i+1}", text)
-
-            # Display tables
-            for i, table in enumerate(unique_tables):
-                display_table_in_sidebar(f"Retrieved Table {i+1}", table)
-
-            # Display images
-            for i, img_path in enumerate(unique_images):
-                display_image_in_sidebar(f"Retrieved Image {i+1}", img_path)
+        except Exception as e:
+            st.error(f"An error occurred: {str(e)}")
+            logger.error(f"Application error: {str(e)}")
 
 if __name__ == "__main__":
     main()

@@ -1,38 +1,22 @@
-from flask import Flask, render_template, request, jsonify, session
+from flask import render_template, request, jsonify, session
 from werkzeug.utils import secure_filename
 import os
-from services.pdf_processor import PDFProcessor
-from services.image_analyzer import ImageAnalyzer
-from services.vector_store_creator import VectorStoreCreator
-from services.gpt_query_engine import GPTQueryEngine
-from services.data_formatter import DataFormatter
-from dotenv import load_dotenv
+from . import create_app
+from .services.pdf_processor import PDFProcessor
+from .services.image_analyzer import ImageAnalyzer
+from .services.vector_store_creator import VectorStoreCreator
+from .services.gpt_query_engine import GPTQueryEngine
+from .services.data_formatter import DataFormatter
 import logging
-import tempfile
-from pathlib import Path
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+app = create_app()
 logger = logging.getLogger(__name__)
 
-# Load environment variables
-load_dotenv()
+# Initialize services
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY not found in environment variables")
 
-# Create Flask app
-app = Flask(__name__)
-app.secret_key = os.urandom(24)
-
-# Configure upload folder
-UPLOAD_FOLDER = Path(tempfile.mkdtemp())
-UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
-app.config['UPLOAD_FOLDER'] = str(UPLOAD_FOLDER)
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
-
-# Initialize services
 pdf_processor = PDFProcessor()
 image_analyzer = ImageAnalyzer()
 vector_store_creator = VectorStoreCreator(OPENAI_API_KEY)
@@ -145,6 +129,3 @@ def cleanup_old_stores():
                 del vector_stores[session_id]
     except Exception as e:
         logger.error(f"Error cleaning up vector stores: {str(e)}")
-
-if __name__ == '__main__':
-    app.run(debug=True)

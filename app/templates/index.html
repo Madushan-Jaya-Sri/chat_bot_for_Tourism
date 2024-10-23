@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Tourism Industry Chatbot</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100">
+    <div class="min-h-screen bg-cover bg-center" style="background-image: url('https://www.travelandtourworld.com/wp-content/uploads/2024/07/Compressed_Malaysia_Travel_Tourism_Under_300KB.jpg');">
+        <div class="container mx-auto px-4 py-8">
+            <div class="bg-white bg-opacity-90 rounded-lg shadow-lg p-6 mb-8">
+                <h1 class="text-3xl font-bold text-center text-gray-800 mb-8">
+                    Advanced Tourism Industry Chatbot
+                </h1>
+
+                <!-- File Upload Section -->
+                <div class="mb-8">
+                    <form id="uploadForm" class="space-y-4">
+                        <label class="block text-gray-700 font-bold mb-2">
+                            Choose a PDF file
+                        </label>
+                        <input type="file" 
+                               id="pdfFile" 
+                               accept=".pdf"
+                               class="w-full p-2 border border-gray-300 rounded">
+                        <button type="submit"
+                                class="w-full bg-blue-500 text-white font-bold py-2 px-4 rounded hover:bg-blue-600 transition duration-200">
+                            Upload PDF
+                        </button>
+                    </form>
+                    <div id="uploadStatus" class="mt-2 text-center hidden"></div>
+                </div>
+
+                <!-- Query Section -->
+                <div id="querySection" class="hidden space-y-4">
+                    <div class="space-y-2">
+                        <label class="block text-gray-700 font-bold">
+                            Your question about the tourism document:
+                        </label>
+                        <input type="text" 
+                               id="queryInput"
+                               class="w-full p-2 border border-gray-300 rounded"
+                               placeholder="Ask a question...">
+                        <button onclick="submitQuery()"
+                                class="w-full bg-green-500 text-white font-bold py-2 px-4 rounded hover:bg-green-600 transition duration-200">
+                            Submit Question
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Response Section -->
+                <div id="responseSection" class="mt-8 hidden">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">Answer:</h2>
+                    <div id="answer" class="bg-white p-4 rounded-lg shadow"></div>
+                    
+                    <!-- Sources Section -->
+                    <div class="mt-4">
+                        <h3 class="text-lg font-bold text-gray-800 mb-2">Sources:</h3>
+                        <div id="sources" class="space-y-2"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const file = document.getElementById('pdfFile').files[0];
+            if (!file) {
+                alert('Please select a file');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const statusDiv = document.getElementById('uploadStatus');
+            statusDiv.innerHTML = 'Uploading and processing file...';
+            statusDiv.className = 'mt-2 text-center text-blue-500';
+            statusDiv.classList.remove('hidden');
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    statusDiv.innerHTML = 'File processed successfully!';
+                    statusDiv.className = 'mt-2 text-center text-green-500';
+                    document.getElementById('querySection').classList.remove('hidden');
+                } else {
+                    throw new Error(result.error || 'Error processing file');
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `Error: ${error.message}`;
+                statusDiv.className = 'mt-2 text-center text-red-500';
+            }
+        });
+
+        async function submitQuery() {
+            const query = document.getElementById('queryInput').value.trim();
+            if (!query) {
+                alert('Please enter a question');
+                return;
+            }
+
+            const responseSection = document.getElementById('responseSection');
+            const answerDiv = document.getElementById('answer');
+            const sourcesDiv = document.getElementById('sources');
+
+            answerDiv.innerHTML = 'Processing your question...';
+            responseSection.classList.remove('hidden');
+            sourcesDiv.innerHTML = '';
+
+            try {
+                const response = await fetch('/query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ query })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    // Handle formatted response
+                    if (result.answer.type === 'table') {
+                        // Create table view
+                        const table = document.createElement('table');
+                        table.className = 'min-w-full divide-y divide-gray-200';
+                        
+                        // Add table data
+                        const tableHTML = result.answer.data.map(row => `
+                            <tr class="hover:bg-gray-50">
+                                ${Object.values(row).map(cell => `
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        ${cell}
+                                    </td>
+                                `).join('')}
+                            </tr>
+                        `).join('');
+                        
+                        table.innerHTML = `
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                ${tableHTML}
+                            </tbody>
+                        `;
+                        answerDiv.innerHTML = '';
+                        answerDiv.appendChild(table);
+                    } else {
+                        // Text response
+                        answerDiv.innerHTML = result.answer.data;
+                    }
+
+                    // Display sources
+                    sourcesDiv.innerHTML = result.sources.map((source, index) => `
+                        <div class="bg-gray-50 p-4 rounded">
+                            <h4 class="font-bold mb-2">Source ${index + 1}</h4>
+                            <p class="text-sm text-gray-600">${source}</p>
+                        </div>
+                    `).join('');
+                } else {
+                    throw new Error(result.error || 'Error processing query');
+                }
+            } catch (error) {
+                answerDiv.innerHTML = `Error: ${error.message}`;
+                answerDiv.className = 'text-red-500';
+            }
+        }
+
+        // Handle Enter key in query input
+        document.getElementById('queryInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                submitQuery();
+            }
+        });
+    </script>
+</body>
+</html>
