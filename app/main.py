@@ -79,11 +79,16 @@ def process_query():
         data = request.get_json()
         query = data.get('query')
         
+        logger.debug(f"Received query: {query}")
+
         if not query:
             return jsonify({'error': 'No query provided'}), 400
         
         session_id = session.get('session_id')
+        logger.debug(f"Session ID: {session_id}")
+        
         if not session_id or session_id not in vector_stores:
+            logger.warning("No valid session found for vector stores.")
             return jsonify({'error': 'Please upload a PDF first'}), 400
         
         stores = vector_stores[session_id]
