@@ -3,6 +3,8 @@ from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from typing import List, Dict, Tuple, Optional
 import logging
+from langchain_openai import OpenAIEmbeddings
+
 
 logger = logging.getLogger(__name__)
 
