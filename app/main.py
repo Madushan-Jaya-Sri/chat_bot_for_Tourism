@@ -8,21 +8,9 @@ from .services.vector_store_creator import VectorStoreCreator
 from .services.gpt_query_engine import GPTQueryEngine
 from .services.data_formatter import DataFormatter
 import logging
-from datetime import timedelta
-import datetime
-
 
 app = create_app()
 logger = logging.getLogger(__name__)
-
-# Configure Flask session
-app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', os.urandom(24))  # Add secure secret key
-app.config['SESSION_TYPE'] = 'filesystem'  # Use filesystem session
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)  # Session lifetime
-app.config['SESSION_FILE_DIR'] = '/tmp/flask_session'  # Persistent session storage
-
-# Ensure session directory exists
-os.makedirs(app.config['SESSION_FILE_DIR'], exist_ok=True)
 
 # Initialize services
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
@@ -35,15 +23,11 @@ vector_store_creator = VectorStoreCreator(OPENAI_API_KEY)
 gpt_query_engine = GPTQueryEngine()
 data_formatter = DataFormatter()
 
-# Store for vector stores (in-memory storage with session mapping)
+# Store for vector stores (in-memory storage)
 vector_stores = {}
 
 @app.route('/')
 def index():
-    # Initialize session if needed
-    if 'session_id' not in session:
-        session['session_id'] = os.urandom(16).hex()
-        session.permanent = True  # Make session persistent
     return render_template('index.html')
 
 @app.route('/upload', methods=['POST'])
@@ -57,11 +41,6 @@ def upload_file():
             return jsonify({'error': 'No selected file'}), 400
         
         if file and file.filename.endswith('.pdf'):
-            # Ensure session exists
-            if 'session_id' not in session:
-                session['session_id'] = os.urandom(16).hex()
-                session.permanent = True
-
             filename = secure_filename(file.filename)
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(filepath)
@@ -75,16 +54,23 @@ def upload_file():
                 text, tables, image_docs
             )
             
+            # Generate unique session ID if not exists
+            if 'session_id' not in session:
+                session['session_id'] = os.urandom(16).hex()
+            print("===================================================================")
+            print("===================================================================")
+
+            
+            print(session['session_id'])
+
+            print("===================================================================")
+            print("===================================================================")
             # Store vector stores in memory with session ID
-            session_id = session['session_id']
-            vector_stores[session_id] = {
+            vector_stores[session['session_id']] = {
                 'vector_store': vector_store,
                 'table_store': table_store,
                 'image_store': image_store
             }
-            
-            # Store filename in session
-            session['uploaded_file'] = filename
             
             return jsonify({'message': 'File processed successfully'}), 200
         
@@ -97,19 +83,15 @@ def upload_file():
 @app.route('/query', methods=['POST'])
 def process_query():
     try:
-        # Ensure session exists
-        if 'session_id' not in session:
-            return jsonify({'error': 'Session expired. Please upload the PDF again'}), 401
-        
         data = request.get_json()
         query = data.get('query')
         
         if not query:
             return jsonify({'error': 'No query provided'}), 400
         
-        session_id = session['session_id']
-        if session_id not in vector_stores:
-            return jsonify({'error': 'Please upload a PDF first'}), 400
+        session_id = session.get('session_id')
+        # if not session_id or session_id not in vector_stores:
+        #     return jsonify({'error': 'Please upload a PDF first'}), 400
         
         stores = vector_stores[session_id]
         vector_store = stores['vector_store']
@@ -144,21 +126,13 @@ def process_query():
         logger.error(f"Error processing query: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-# Modified cleanup function
+# Cleanup function to remove old vector stores
 @app.before_request
 def cleanup_old_stores():
     try:
-        # Only clean up expired sessions
-        current_time = datetime.now()
-        session_lifetime = app.config['PERMANENT_SESSION_LIFETIME']
-        
+        # Remove vector stores for expired sessions
         for session_id in list(vector_stores.keys()):
-            session_file = os.path.join(app.config['SESSION_FILE_DIR'], f'session-{session_id}')
-            if not os.path.exists(session_file):
+            if session_id not in [s.get('session_id') for s in session]:
                 del vector_stores[session_id]
-                logger.info(f"Cleaned up expired session: {session_id}")
     except Exception as e:
         logger.error(f"Error cleaning up vector stores: {str(e)}")
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
