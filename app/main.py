@@ -57,14 +57,7 @@ def upload_file():
             # Generate unique session ID if not exists
             if 'session_id' not in session:
                 session['session_id'] = os.urandom(16).hex()
-            print("===================================================================")
-            print("===================================================================")
-
             
-            print(session['session_id'])
-
-            print("===================================================================")
-            print("===================================================================")
             # Store vector stores in memory with session ID
             vector_stores[session['session_id']] = {
                 'vector_store': vector_store,
@@ -90,8 +83,8 @@ def process_query():
             return jsonify({'error': 'No query provided'}), 400
         
         session_id = session.get('session_id')
-        # if not session_id or session_id not in vector_stores:
-        #     return jsonify({'error': 'Please upload a PDF first'}), 400
+        if not session_id or session_id not in vector_stores:
+            return jsonify({'error': 'Please upload a PDF first'}), 400
         
         stores = vector_stores[session_id]
         vector_store = stores['vector_store']
