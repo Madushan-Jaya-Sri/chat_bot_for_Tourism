@@ -7,16 +7,14 @@
             margin: 0;
             padding: 20px;
             font-family: Arial, sans-serif;
-            background-size: cover;
-            background-position: center;
-            min-height: 100vh;
+            background-color: #f5f5f5;
         }
 
         .container {
             max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
-            background-color: rgba(255, 255, 255, 0.95);
+            background-color: #fff;
             border-radius: 10px;
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
         }
@@ -24,55 +22,65 @@
         h1 {
             text-align: center;
             color: #333;
+            margin-bottom: 30px;
         }
 
         .section {
             margin: 20px 0;
         }
 
+        h3 {
+            color: #444;
+            margin-bottom: 15px;
+        }
+
         .file-input-container {
             margin: 20px 0;
         }
 
-        .file-input-info {
-            font-size: 0.9em;
+        .file-info-text {
             color: #666;
+            font-size: 0.9em;
             margin: 5px 0;
         }
 
         .upload-btn {
-            background-color: #4285f4;
+            background-color: #ccc;
             color: white;
-            padding: 10px 20px;
+            padding: 12px 20px;
             border: none;
             border-radius: 5px;
-            cursor: pointer;
+            cursor: not-allowed;
             width: 100%;
-            margin-top: 10px;
+            font-size: 1em;
+            transition: background-color 0.3s;
         }
 
-        .upload-btn:disabled {
-            background-color: #ccc;
-            cursor: not-allowed;
+        .upload-btn.active {
+            background-color: #4285f4;
+            cursor: pointer;
         }
 
         .question-input {
             width: 100%;
-            padding: 10px;
+            padding: 12px;
             margin: 10px 0;
             border: 1px solid #ddd;
             border-radius: 5px;
             box-sizing: border-box;
+            font-size: 1em;
         }
 
         .submit-btn {
             background-color: #34a853;
             color: white;
-            padding: 10px 20px;
+            padding: 12px 20px;
             border: none;
             border-radius: 5px;
             cursor: pointer;
             width: 100%;
+            font-size: 1em;
+            transition: background-color 0.3s;
         }
 
         .submit-btn:disabled {
@@ -80,24 +88,9 @@
             cursor: not-allowed;
         }
 
-        .answer-section {
-            margin-top: 20px;
-            padding: 15px;
-            background-color: #f8f9fa;
-            border-radius: 5px;
-            display: none;
-        }
-
-        .sources-section {
-            margin-top: 15px;
-            font-size: 0.9em;
-            color: #666;
-            display: none;
-        }
-
         .status-message {
             margin: 10px 0;
-            padding: 10px;
+            padding: 12px;
             border-radius: 5px;
         }
 
@@ -116,21 +109,35 @@
             color: #4285f4;
         }
 
+        .warning-message {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+
         .file-info {
             margin: 10px 0;
-            padding: 10px;
+            padding: 15px;
             background-color: #f8f9fa;
             border-radius: 5px;
             font-size: 0.9em;
         }
 
-        .expire-warning {
-            color: #856404;
-            background-color: #fff3cd;
-            padding: 10px;
+        .answer-container {
+            margin-top: 20px;
+        }
+
+        .answer-section {
+            background-color: #f8f9fa;
+            padding: 15px;
             border-radius: 5px;
-            margin-top: 10px;
-            display: none;
+            margin-bottom: 10px;
+        }
+
+        .sources-section {
+            font-size: 0.9em;
+            color: #666;
+            padding: 10px;
+            border-top: 1px solid #eee;
         }
     </style>
 </head>
@@ -141,8 +148,8 @@
         <div class="section">
             <h3>Upload PDF Document</h3>
             <div class="file-input-container">
-                <input type="file" accept=".pdf" id="pdfFile" required>
-                <div class="file-input-info">
+                <input type="file" accept=".pdf" id="pdfFile">
+                <div class="file-info-text">
                     Maximum file size: 16MB
                     <br>
                     Allowed format: PDF only
@@ -151,9 +158,6 @@
             <button id="uploadButton" class="upload-btn">Upload PDF</button>
             <div id="uploadStatus"></div>
             <div id="fileInfo" class="file-info"></div>
-            <div id="expireWarning" class="expire-warning">
-                Your session will expire in 60 minutes. Please save any important information.
-            </div>
         </div>
 
         <div class="section">
@@ -161,133 +165,74 @@
             <input type="text" id="queryInput" class="question-input" placeholder="Enter your question about the document" disabled>
             <button id="submitButton" class="submit-btn" disabled>Submit Question</button>
             <div id="queryStatus"></div>
-            <div id="answer" class="answer-section"></div>
-            <div id="sources" class="sources-section"></div>
+            <div class="answer-container">
+                <div id="answer" class="answer-section" style="display: none;"></div>
+                <div id="sources" class="sources-section" style="display: none;"></div>
+            </div>
         </div>
     </div>
 
     <script>
-        const MAX_FILE_SIZE = 16 * 1024 * 1024; // 16MB in bytes
-        const ALLOWED_EXTENSIONS = ['pdf'];
-        const STATUS_CHECK_INTERVAL = 2000; // 2 seconds
-        const SESSION_EXPIRE_TIME = 3600000; // 1 hour in milliseconds
-        
+        const MAX_FILE_SIZE = 16 * 1024 * 1024;
+        const STATUS_CHECK_INTERVAL = 2000;
         let processingCheck;
-        let sessionTimer;
-        let isProcessing = false;
+        let sessionActive = false;
 
-        // File validation
+        // Initialize event listeners
+        document.addEventListener('DOMContentLoaded', () => {
+            const fileInput = document.getElementById('pdfFile');
+            const uploadButton = document.getElementById('uploadButton');
+
+            fileInput.addEventListener('change', handleFileSelect);
+            uploadButton.addEventListener('click', handleUpload);
+            document.getElementById('submitButton').addEventListener('click', handleQuery);
+        });
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            const uploadButton = document.getElementById('uploadButton');
+            
+            if (file) {
+                if (validateFile(file)) {
+                    uploadButton.classList.add('active');
+                    uploadButton.disabled = false;
+                } else {
+                    uploadButton.classList.remove('active');
+                    uploadButton.disabled = true;
+                }
+            } else {
+                uploadButton.classList.remove('active');
+                uploadButton.disabled = true;
+            }
+        }
+
         function validateFile(file) {
-            if (!file) {
-                throw new Error('Please select a file');
-            }
+            if (!file) return false;
 
-            const extension = file.name.split('.').pop().toLowerCase();
-            if (!ALLOWED_EXTENSIONS.includes(extension)) {
-                throw new Error('Only PDF files are allowed');
-            }
+            const isValidSize = file.size <= MAX_FILE_SIZE;
+            const isValidType = file.type === 'application/pdf';
 
-            if (file.size > MAX_FILE_SIZE) {
-                throw new Error('File size exceeds 16MB limit');
+            if (!isValidSize) {
+                showStatus('uploadStatus', 'File size exceeds 16MB limit', 'error');
+                return false;
             }
-
+            if (!isValidType) {
+                showStatus('uploadStatus', 'Only PDF files are allowed', 'error');
+                return false;
+            }
             return true;
         }
 
-        // Status message display
-        function showStatus(elementId, message, type) {
-            const element = document.getElementById(elementId);
-            element.className = `status-message ${type}-message`;
-            element.textContent = message;
-        }
+        async function handleUpload() {
+            const file = document.getElementById('pdfFile').files[0];
+            if (!file || !validateFile(file)) return;
 
-        // File info display
-        function showFileInfo(data) {
-            const fileInfo = document.getElementById('fileInfo');
-            if (data.file_info) {
-                const uploadTime = new Date(data.file_info.upload_time * 1000).toLocaleString();
-                const fileSize = (data.file_info.file_size / (1024 * 1024)).toFixed(2);
-                fileInfo.innerHTML = `
-                    <strong>File:</strong> ${data.file_info.filename}<br>
-                    <strong>Size:</strong> ${fileSize}MB<br>
-                    <strong>Uploaded:</strong> ${uploadTime}
-                `;
-                fileInfo.style.display = 'block';
-            }
-        }
-
-        // Processing status check
-        async function checkProcessingStatus() {
-            try {
-                const response = await fetch('/status');
-                const data = await response.json();
-                
-                if (!response.ok) {
-                    throw new Error(data.error || 'Failed to check status');
-                }
-
-                showFileInfo(data);
-
-                switch (data.status) {
-                    case 'complete':
-                        clearInterval(processingCheck);
-                        showStatus('uploadStatus', 'File processed successfully!', 'success');
-                        enableQueryInterface();
-                        startSessionTimer();
-                        break;
-                    case 'failed':
-                        clearInterval(processingCheck);
-                        showStatus('uploadStatus', `Processing failed: ${data.error || 'Unknown error'}`, 'error');
-                        disableQueryInterface();
-                        break;
-                    case 'processing':
-                        showStatus('uploadStatus', 'Processing file...', 'processing');
-                        disableQueryInterface();
-                        break;
-                }
-            } catch (error) {
-                showStatus('uploadStatus', `Error: ${error.message}`, 'error');
-                disableQueryInterface();
-            }
-        }
-
-        // Interface state management
-        function enableQueryInterface() {
-            document.getElementById('queryInput').disabled = false;
-            document.getElementById('submitButton').disabled = false;
-            isProcessing = false;
-        }
-
-        function disableQueryInterface() {
-            document.getElementById('queryInput').disabled = true;
-            document.getElementById('submitButton').disabled = true;
-            isProcessing = true;
-        }
-
-        // Session management
-        function startSessionTimer() {
-            document.getElementById('expireWarning').style.display = 'block';
-            if (sessionTimer) clearTimeout(sessionTimer);
-            sessionTimer = setTimeout(() => {
-                showStatus('uploadStatus', 'Session expired. Please upload your file again.', 'error');
-                disableQueryInterface();
-                document.getElementById('expireWarning').style.display = 'none';
-            }, SESSION_EXPIRE_TIME);
-        }
-
-        // File upload handling
-        document.getElementById('uploadButton').addEventListener('click', async () => {
-            const fileInput = document.getElementById('pdfFile');
-            const file = fileInput.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
 
             try {
-                validateFile(file);
-                const formData = new FormData();
-                formData.append('file', file);
-
-                document.getElementById('uploadButton').disabled = true;
+                disableInterface();
                 showStatus('uploadStatus', 'Uploading file...', 'processing');
-                disableQueryInterface();
 
                 const response = await fetch('/upload', {
                     method: 'POST',
@@ -296,20 +241,55 @@
 
                 const data = await response.json();
                 
-                if (!response.ok) {
+                if (response.ok) {
+                    sessionActive = true;
+                    processingCheck = setInterval(checkStatus, STATUS_CHECK_INTERVAL);
+                } else {
                     throw new Error(data.error || 'Upload failed');
                 }
-
-                processingCheck = setInterval(checkProcessingStatus, STATUS_CHECK_INTERVAL);
             } catch (error) {
                 showStatus('uploadStatus', `Error: ${error.message}`, 'error');
-                document.getElementById('uploadButton').disabled = false;
+                enableInterface();
             }
-        });
+        }
 
-        // Query handling
-        document.getElementById('submitButton').addEventListener('click', async () => {
-            const query = document.getElementById('queryInput').value.trim();
+        async function checkStatus() {
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+
+                if (response.ok) {
+                    updateFileInfo(data.file_info);
+                    
+                    switch(data.status) {
+                        case 'complete':
+                            clearInterval(processingCheck);
+                            showStatus('uploadStatus', 'File processed successfully!', 'success');
+                            enableInterface();
+                            showSessionWarning();
+                            break;
+                        case 'failed':
+                            clearInterval(processingCheck);
+                            showStatus('uploadStatus', `Processing failed: ${data.error || 'Unknown error'}`, 'error');
+                            sessionActive = false;
+                            break;
+                        case 'processing':
+                            showStatus('uploadStatus', 'Processing file...', 'processing');
+                            break;
+                    }
+                } else {
+                    throw new Error(data.error || 'Status check failed');
+                }
+            } catch (error) {
+                showStatus('uploadStatus', `Error: ${error.message}`, 'error');
+                clearInterval(processingCheck);
+                sessionActive = false;
+            }
+        }
+
+        async function handleQuery() {
+            const queryInput = document.getElementById('queryInput');
+            const query = queryInput.value.trim();
             
             if (!query) {
                 showStatus('queryStatus', 'Please enter a question', 'error');
@@ -322,43 +302,83 @@
 
                 const response = await fetch('/query', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
                     body: JSON.stringify({ query })
                 });
 
                 const data = await response.json();
 
-                if (!response.ok) {
-                    throw new Error(data.error || 'Query failed');
+                if (response.ok) {
+                    displayAnswer(data);
+                    document.getElementById('queryStatus').style.display = 'none';
+                } else {
+                    if (response.status === 401) {
+                        sessionActive = false;
+                        showStatus('queryStatus', 'Session expired. Please upload your file again.', 'error');
+                        disableInterface();
+                    } else {
+                        throw new Error(data.error || 'Query failed');
+                    }
                 }
-
-                // Display answer and sources
-                const answerSection = document.getElementById('answer');
-                const sourcesSection = document.getElementById('sources');
-
-                answerSection.innerHTML = `<h4>Answer:</h4><p>${data.answer}</p>`;
-                answerSection.style.display = 'block';
-
-                sourcesSection.innerHTML = `<h4>Sources:</h4><p>${data.sources.join('<br><br>')}</p>`;
-                sourcesSection.style.display = 'block';
-
-                document.getElementById('queryStatus').style.display = 'none';
             } catch (error) {
                 showStatus('queryStatus', `Error: ${error.message}`, 'error');
             } finally {
                 document.getElementById('submitButton').disabled = false;
             }
-        });
+        }
 
-        // File input change handler
-        document.getElementById('pdfFile').addEventListener('change', () => {
+        function showStatus(elementId, message, type) {
+            const element = document.getElementById(elementId);
+            element.className = `status-message ${type}-message`;
+            element.textContent = message;
+            element.style.display = 'block';
+        }
+
+        function updateFileInfo(fileInfo) {
+            if (!fileInfo) return;
+            
+            const fileInfoElement = document.getElementById('fileInfo');
+            const uploadTime = new Date(fileInfo.upload_time * 1000).toLocaleString();
+            const fileSize = (fileInfo.file_size / (1024 * 1024)).toFixed(2);
+            
+            fileInfoElement.innerHTML = `
+                <strong>File:</strong> ${fileInfo.filename}<br>
+                <strong>Size:</strong> ${fileSize}MB<br>
+                <strong>Uploaded:</strong> ${uploadTime}
+            `;
+            fileInfoElement.style.display = 'block';
+        }
+
+        function displayAnswer(data) {
+            const answerElement = document.getElementById('answer');
+            const sourcesElement = document.getElementById('sources');
+
+            answerElement.innerHTML = `<h4>Answer:</h4><p>${data.answer}</p>`;
+            answerElement.style.display = 'block';
+
+            if (data.sources && data.sources.length > 0) {
+                sourcesElement.innerHTML = `<h4>Sources:</h4><p>${data.sources.join('<br><br>')}</p>`;
+                sourcesElement.style.display = 'block';
+            }
+        }
+
+        function showSessionWarning() {
+            showStatus('uploadStatus', 'Your session will expire in 60 minutes. Please save any important information.', 'warning');
+        }
+
+        function enableInterface() {
+            document.getElementById('queryInput').disabled = false;
+            document.getElementById('submitButton').disabled = false;
             document.getElementById('uploadButton').disabled = false;
-            document.getElementById('uploadStatus').textContent = '';
-            document.getElementById('fileInfo').textContent = '';
-            document.getElementById('answer').style.display = 'none';
-            document.getElementById('sources').style.display = 'none';
-            document.getElementById('expireWarning').style.display = 'none';
-        });
+        }
+
+        function disableInterface() {
+            document.getElementById('queryInput').disabled = true;
+            document.getElementById('submitButton').disabled = true;
+            document.getElementById('uploadButton').disabled = true;
+        }
     </script>
 </body>
 </html>
