@@ -1,3 +1,4 @@
+# app/main.py
 from flask import render_template, request, jsonify, session
 from werkzeug.utils import secure_filename
 import os
@@ -8,6 +9,8 @@ from .services.vector_store_creator import VectorStoreCreator
 from .services.gpt_query_engine import GPTQueryEngine
 from .services.data_formatter import DataFormatter
 import logging
+import time
+from functools import wraps
 
 app = create_app()
 logger = logging.getLogger(__name__)
@@ -23,8 +26,27 @@ vector_store_creator = VectorStoreCreator(OPENAI_API_KEY)
 gpt_query_engine = GPTQueryEngine()
 data_formatter = DataFormatter()
 
-# Store for vector stores (in-memory storage)
+# Store for vector stores and processing status
 vector_stores = {}
+processing_status = {}
+
+def check_processing_complete(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        session_id = session.get('session_id')
+        if not session_id:
+            return jsonify({'error': 'No session found'}), 400
+        
+        # Check if still processing
+        if processing_status.get(session_id) == 'processing':
+            return jsonify({'error': 'File is still being processed'}), 409
+        
+        # Check if processing failed
+        if processing_status.get(session_id) == 'failed':
+            return jsonify({'error': 'File processing failed. Please upload again'}), 500
+            
+        return func(*args, **kwargs)
+    return wrapper
 
 @app.route('/')
 def index():
@@ -40,55 +62,75 @@ def upload_file():
         if file.filename == '':
             return jsonify({'error': 'No selected file'}), 400
         
-        if file and file.filename.endswith('.pdf'):
-            filename = secure_filename(file.filename)
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(filepath)
-            
-            # Process PDF
-            text, tables, image_paths = pdf_processor.extract_data_from_pdf(filepath)
-            image_docs = image_analyzer.analyze_images(image_paths)
-            
-            # Create vector stores
-            vector_store, table_store, image_store = vector_store_creator.create_vector_stores(
-                text, tables, image_docs
-            )
-            
-            # Generate unique session ID if not exists
-            if 'session_id' not in session:
-                session['session_id'] = os.urandom(16).hex()
-            
-            # Store vector stores in memory with session ID
-            vector_stores[session['session_id']] = {
-                'vector_store': vector_store,
-                'table_store': table_store,
-                'image_store': image_store
-            }
-            
-            return jsonify({'message': 'File processed successfully'}), 200
+        # Generate unique session ID if not exists
+        if 'session_id' not in session:
+            session['session_id'] = os.urandom(16).hex()
         
+        session_id = session['session_id']
+        
+        if file and file.filename.endswith('.pdf'):
+            # Set processing status
+            processing_status[session_id] = 'processing'
+            
+            try:
+                filename = secure_filename(file.filename)
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                
+                # Process PDF
+                text, tables, image_paths = pdf_processor.extract_data_from_pdf(filepath)
+                image_docs = image_analyzer.analyze_images(image_paths)
+                
+                # Create vector stores
+                vector_store, table_store, image_store = vector_store_creator.create_vector_stores(
+                    text, tables, image_docs
+                )
+                
+                # Store vector stores in memory with session ID
+                vector_stores[session_id] = {
+                    'vector_store': vector_store,
+                    'table_store': table_store,
+                    'image_store': image_store,
+                    'timestamp': time.time()
+                }
+                
+                # Update processing status
+                processing_status[session_id] = 'complete'
+                
+                return jsonify({'message': 'File processed successfully'}), 200
+            
+            except Exception as e:
+                logger.error(f"Error processing file: {str(e)}")
+                processing_status[session_id] = 'failed'
+                return jsonify({'error': str(e)}), 500
+            
         return jsonify({'error': 'Invalid file type'}), 400
     
     except Exception as e:
-        logger.error(f"Error processing file: {str(e)}")
+        logger.error(f"Error in upload: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/status', methods=['GET'])
+def check_status():
+    session_id = session.get('session_id')
+    if not session_id:
+        return jsonify({'status': 'no_session'}), 400
+    
+    status = processing_status.get(session_id, 'unknown')
+    return jsonify({'status': status}), 200
+
 @app.route('/query', methods=['POST'])
+@check_processing_complete
 def process_query():
     try:
         data = request.get_json()
         query = data.get('query')
         
-        logger.debug(f"Received query: {query}")
-
         if not query:
             return jsonify({'error': 'No query provided'}), 400
         
         session_id = session.get('session_id')
-        logger.debug(f"Session ID: {session_id}")
-        
         if not session_id or session_id not in vector_stores:
-            logger.warning("No valid session found for vector stores.")
             return jsonify({'error': 'Please upload a PDF first'}), 400
         
         stores = vector_stores[session_id]
@@ -124,13 +166,16 @@ def process_query():
         logger.error(f"Error processing query: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-# Cleanup function to remove old vector stores
+# Cleanup function to remove old vector stores and status
 @app.before_request
 def cleanup_old_stores():
     try:
-        # Remove vector stores for expired sessions
+        current_time = time.time()
+        # Remove vector stores and status for expired sessions (older than 1 hour)
         for session_id in list(vector_stores.keys()):
-            if session_id not in [s.get('session_id') for s in session]:
+            if current_time - vector_stores[session_id]['timestamp'] > 3600:
                 del vector_stores[session_id]
+                if session_id in processing_status:
+                    del processing_status[session_id]
     except Exception as e:
-        logger.error(f"Error cleaning up vector stores: {str(e)}")
+        logger.error(f"Error cleaning up stores: {str(e)}")
