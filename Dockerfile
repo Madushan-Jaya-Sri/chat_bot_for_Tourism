@@ -23,6 +23,10 @@ COPY . .
 # Create uploads directory
 RUN mkdir -p app/static/uploads && chmod 777 app/static/uploads
 
+# Add these to your existing Dockerfile
+RUN mkdir -p /tmp/flask_session
+VOLUME ["/tmp/flask_session"]
+
 # Copy entrypoint script
 COPY scripts/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
