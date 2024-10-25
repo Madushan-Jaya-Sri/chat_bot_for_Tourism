@@ -1,0 +1,67 @@
+.chat-container {
+    max-height: 70vh;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(155, 155, 155, 0.5) transparent;
+}
+
+.chat-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.chat-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.chat-container::-webkit-scrollbar-thumb {
+    background-color: rgba(155, 155, 155, 0.5);
+    border-radius: 20px;
+    border: transparent;
+}
+
+.message-user {
+    background-color: #1a73e8;
+    color: white;
+    border-radius: 1rem;
+    padding: 0.75rem;
+    margin: 0.5rem 0;
+    max-width: 80%;
+    margin-left: auto;
+}
+
+.message-bot {
+    background-color: #f1f3f4;
+    border-radius: 1rem;
+    padding: 0.75rem;
+    margin: 0.5rem 0;
+    max-width: 80%;
+}
+
+.template-card {
+    transition: all 0.3s ease;
+}
+
+.template-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.loading-dots:after {
+    content: '.';
+    animation: dots 1.5s steps(5, end) infinite;
+}
+
+@keyframes dots {
+    0%, 20% {
+        content: '.';
+    }
+    40% {
+        content: '..';
+    }
+    60% {
+        content: '...';
+    }
+    80%, 100% {
+        content: '';
+    }
+}
