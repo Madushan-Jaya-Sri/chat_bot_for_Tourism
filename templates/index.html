@@ -1,104 +1,173 @@
 {% extends "base.html" %}
-
-{% block extra_head %}
-<style>
-    .message-container {
-        height: calc(100vh - 300px);
-        overflow-y: auto;
-    }
-</style>
-{% endblock %}
-
 {% block content %}
-<div class="max-w-6xl mx-auto p-4">
-    <div class="bg-white rounded-lg shadow-lg p-6">
-        <!-- Demo Templates -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <div class="bg-gray-50 p-4 rounded-lg cursor-pointer hover:bg-gray-100">
-                <div class="text-2xl mb-2">✈️</div>
-                <h3 class="font-bold">Travel Guide</h3>
-                <p class="text-sm text-gray-600">Explore destinations</p>
-            </div>
-            <div class="bg-gray-50 p-4 rounded-lg cursor-pointer hover:bg-gray-100">
-                <div class="text-2xl mb-2">📊</div>
-                <h3 class="font-bold">Data Analysis</h3>
-                <p class="text-sm text-gray-600">Key insights</p>
-            </div>
-            <div class="bg-gray-50 p-4 rounded-lg cursor-pointer hover:bg-gray-100">
-                <div class="text-2xl mb-2">🎨</div>
-                <h3 class="font-bold">Design Trends</h3>
-                <p class="text-sm text-gray-600">Latest updates</p>
+
+<div class="flex-1 flex">
+    <div class="w-64 bg-gray-50 border-r border-gray-200 hidden md:block">
+        <div class="p-4">
+            <h2 class="text-lg font-semibold mb-4">Chat History</h2>
+            <div id="chatHistory" class="space-y-2">
+                <!-- Chat history items will be dynamically added here -->
             </div>
         </div>
+    </div>
 
-        <!-- Chat Interface -->
-        <div class="message-container mb-4" id="messageContainer">
-            <div class="flex items-start mb-4">
-                <div class="bg-gray-100 rounded-lg p-3 max-w-md">
-                    <p>Hi! How can I help you today?</p>
+    <div class="flex-1 overflow-hidden">
+        <div class="max-w-6xl mx-auto p-4">
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <div id="chatContainer" class="chat-container mb-6">
+                    <div class="flex items-start justify-center mb-4">
+                        <div class="bg-gray-100 rounded-lg p-3 max-w-md text-center">
+                            Hi! How can I help you today?
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex space-x-4">
+                    <div class="flex-1">
+                        <textarea id="userInput" 
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                                rows="3" 
+                                placeholder="Type your message here..."></textarea>
+                    </div>
+                    <button id="sendButton" 
+                            class="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        Send
+                    </button>
                 </div>
             </div>
-        </div>
-
-        <!-- Input Area -->
-        <div class="flex space-x-2">
-            <input type="text" id="userInput" class="flex-1 p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Type your message...">
-            <button onclick="sendMessage()" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                Send
-            </button>
         </div>
     </div>
 </div>
 
+
 <script>
-function appendMessage(message, isUser) {
+const chatContainer = document.getElementById('chatContainer');
+const userInput = document.getElementById('userInput');
+
+function addMessage(message, isUser = false) {
     const messageDiv = document.createElement('div');
-    messageDiv.className = `flex items-start mb-4 ${isUser ? 'justify-end' : ''}`;
+    messageDiv.className = `flex items-start ${isUser ? 'justify-end' : 'justify-start'} mb-4`;
     
     const messageContent = document.createElement('div');
-    messageContent.className = `rounded-lg p-3 max-w-md ${isUser ? 'bg-blue-500 text-white' : 'bg-gray-100'}`;
+    messageContent.className = isUser ? 'message-user' : 'message-bot';
     messageContent.textContent = message;
     
     messageDiv.appendChild(messageContent);
-    document.getElementById('messageContainer').appendChild(messageDiv);
-    messageDiv.scrollIntoView({ behavior: 'smooth' });
+    chatContainer.appendChild(messageDiv);
+    chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
-function sendMessage() {
-    const input = document.getElementById('userInput');
-    const message = input.value.trim();
-    
+function showLoading() {
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'flex items-start justify-start mb-4';
+    loadingDiv.innerHTML = `
+        <div class="message-bot">
+            <span class="loading-dots">Thinking</span>
+        </div>
+    `;
+    loadingDiv.id = 'loadingMessage';
+    chatContainer.appendChild(loadingDiv);
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+}
+
+function removeLoading() {
+    const loadingMessage = document.getElementById('loadingMessage');
+    if (loadingMessage) {
+        loadingMessage.remove();
+    }
+}
+
+async function sendMessage() {
+    const message = userInput.value.trim();
     if (!message) return;
-    
-    appendMessage(message, true);
-    input.value = '';
-    
-    fetch('/chat', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ question: message })
-    })
-    .then(response => response.json())
-    .then(data => {
+
+    // Add user message
+    addMessage(message, true);
+    userInput.value = '';
+
+    // Show loading indicator
+    showLoading();
+
+    try {
+        const response = await fetch('/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ question: message })
+        });
+
+        const data = await response.json();
+        removeLoading();
+
         if (data.success) {
-            appendMessage(data.answer, false);
+            addMessage(data.answer);
+            loadChatHistory(); // Refresh chat history
         } else {
-            appendMessage("Sorry, I encountered an error. Please try again.", false);
+            addMessage("Sorry, I encountered an error. Please try again.");
         }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        appendMessage("Sorry, I encountered an error. Please try again.", false);
-    });
+    } catch (error) {
+        removeLoading();
+        addMessage("Sorry, there was an error connecting to the server.");
+    }
 }
 
-// Allow sending message with Enter key
-document.getElementById('userInput').addEventListener('keypress', function(e) {
+async function loadChatHistory() {
+    try {
+        const response = await fetch('/chat-history');
+        const history = await response.json();
+        
+        const historyContainer = document.getElementById('chatHistory');
+        historyContainer.innerHTML = '';
+        
+        history.forEach(chat => {
+            const historyItem = document.createElement('div');
+            historyItem.className = 'history-item';
+            historyItem.innerHTML = `
+                <div class="history-item-title">${chat.title}</div>
+                <div class="history-item-preview">${chat.preview}</div>
+            `;
+            historyItem.onclick = () => loadChat(chat.id);
+            historyContainer.appendChild(historyItem);
+        });
+    } catch (error) {
+        console.error('Error loading chat history:', error);
+    }
+}
+
+async function loadChat(chatId) {
+    try {
+        const response = await fetch(`/chat-history/${chatId}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            // Clear current chat
+            chatContainer.innerHTML = '';
+            
+            // Parse the conversation and add messages
+            const conversation = data.conversation.split('\n');
+            for (let i = 0; i < conversation.length; i++) {
+                const line = conversation[i].trim();
+                if (line.startsWith('Q: ')) {
+                    addMessage(line.substring(3), true);
+                } else if (line.startsWith('A: ')) {
+                    addMessage(line.substring(3), false);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error loading chat:', error);
+    }
+}
+
+// Event listener for Enter key
+userInput.addEventListener('keypress', function(e) {
     if (e.key === 'Enter') {
         sendMessage();
     }
 });
+
+// Load chat history when the page loads
+document.addEventListener('DOMContentLoaded', loadChatHistory);
 </script>
 {% endblock %}

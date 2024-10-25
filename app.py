@@ -3,16 +3,17 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings  # Updated import
+from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_openai import ChatOpenAI  # Updated import
+from langchain_openai import ChatOpenAI
 from langchain_core.runnables import RunnablePassthrough
 from langchain.memory import ConversationBufferMemory
 from dotenv import load_dotenv
 import os
 import sqlite3
+from datetime import datetime
 
 # Load environment variables
 load_dotenv()
@@ -32,6 +33,8 @@ if not app.secret_key:
 def init_db():
     conn = sqlite3.connect('database.db')
     c = conn.cursor()
+    
+    # Create users table
     c.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,6 +43,20 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    
+    # Create chat_history table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS chat_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            title TEXT NOT NULL,
+            preview TEXT NOT NULL,
+            full_conversation TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (username) REFERENCES users(username)
+        )
+    ''')
+    
     conn.commit()
     conn.close()
 
@@ -178,6 +195,24 @@ def chat():
             "question": question
         })
         
+        # Save to chat history
+        conn = sqlite3.connect('database.db')
+        c = conn.cursor()
+        
+        # Create a title from the first 50 characters of the question
+        title = question[:50] + "..." if len(question) > 50 else question
+        # Create a preview from the first 100 characters of the response
+        preview = str(response)[:100] + "..." if len(str(response)) > 100 else str(response)
+        
+        c.execute('''
+            INSERT INTO chat_history (username, title, preview, full_conversation)
+            VALUES (?, ?, ?, ?)
+        ''', (session['username'], title, preview, 
+              f"Q: {question}\nA: {response}"))
+        
+        conn.commit()
+        conn.close()
+        
         return jsonify({
             "answer": response,
             "success": True
@@ -185,6 +220,54 @@ def chat():
     except Exception as e:
         return jsonify({
             "error": str(e),
+            "success": False
+        })
+
+@app.route('/chat-history', methods=['GET'])
+@login_required
+def get_chat_history():
+    conn = sqlite3.connect('database.db')
+    c = conn.cursor()
+    
+    # Get chat history for the current user
+    history = c.execute('''
+        SELECT id, title, preview, created_at 
+        FROM chat_history 
+        WHERE username = ? 
+        ORDER BY created_at DESC
+    ''', (session['username'],)).fetchall()
+    
+    conn.close()
+    
+    return jsonify([{
+        'id': h[0],
+        'title': h[1],
+        'preview': h[2],
+        'timestamp': h[3]
+    } for h in history])
+
+@app.route('/chat-history/<int:chat_id>', methods=['GET'])
+@login_required
+def get_chat_detail(chat_id):
+    conn = sqlite3.connect('database.db')
+    c = conn.cursor()
+    
+    chat = c.execute('''
+        SELECT full_conversation 
+        FROM chat_history 
+        WHERE id = ? AND username = ?
+    ''', (chat_id, session['username'])).fetchone()
+    
+    conn.close()
+    
+    if chat:
+        return jsonify({
+            "conversation": chat[0],
+            "success": True
+        })
+    else:
+        return jsonify({
+            "error": "Chat not found",
             "success": False
         })
 
