@@ -3,12 +3,12 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings  # Updated import
 from langchain_community.vectorstores import Chroma
 from langchain_core.prompts import ChatPromptTemplate
-from langchain.chains import create_retrieval_chain
-from langchain.chains import create_history_aware_retriever
-from langchain_community.chat_models import ChatOpenAI
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_openai import ChatOpenAI  # Updated import
+from langchain_core.runnables import RunnablePassthrough
 from langchain.memory import ConversationBufferMemory
 from dotenv import load_dotenv
 import os
@@ -17,12 +17,18 @@ import sqlite3
 # Load environment variables
 load_dotenv()
 
+# Get OpenAI API key and verify it exists
+openai_api_key = os.getenv('OPENAI_API_KEY')
+if not openai_api_key:
+    raise ValueError("No OpenAI API key found. Please set the OPENAI_API_KEY environment variable.")
+
 app = Flask(__name__)
 
-app.secret_key = os.environ.get('FLASK_SECRET_KEY')
-openai_api_key = os.environ.get('OPENAI_API_KEY')
+# Get Flask secret key and verify it exists
+app.secret_key = os.getenv('FLASK_SECRET_KEY')
+if not app.secret_key:
+    raise ValueError("No Flask secret key found. Please set the FLASK_SECRET_KEY environment variable.")
 
-# Database initialization
 def init_db():
     conn = sqlite3.connect('database.db')
     c = conn.cursor()
@@ -38,14 +44,20 @@ def init_db():
     conn.close()
 
 def initialize_rag():
-    # Load PDFs from a designated directory
-    pdf_directory = "static/pdfs/"  # Ensure this directory exists
-    documents = []
+    # Verify PDF directory exists
+    pdf_directory = "static/pdfs/"
+    if not os.path.exists(pdf_directory):
+        raise FileNotFoundError(f"PDF directory not found at {pdf_directory}")
     
-    for filename in os.listdir(pdf_directory):
-        if filename.endswith('.pdf'):
-            loader = PyPDFLoader(os.path.join(pdf_directory, filename))
-            documents.extend(loader.load())
+    documents = []
+    pdf_files = [f for f in os.listdir(pdf_directory) if f.endswith('.pdf')]
+    
+    if not pdf_files:
+        raise FileNotFoundError(f"No PDF files found in {pdf_directory}")
+    
+    for filename in pdf_files:
+        loader = PyPDFLoader(os.path.join(pdf_directory, filename))
+        documents.extend(loader.load())
 
     # Split documents
     text_splitter = RecursiveCharacterTextSplitter(
@@ -54,61 +66,50 @@ def initialize_rag():
     )
     splits = text_splitter.split_documents(documents)
 
-    # Create embeddings and vector store using Chroma
-    embeddings = OpenAIEmbeddings()
+    # Create embeddings with explicit API key
+    embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
     
     # Create vector store
     vectorstore = Chroma.from_documents(documents=splits, embedding=embeddings)
 
-    # Initialize the LLM
-    llm = ChatOpenAI(temperature=0.7, model_name="gpt-4")
-
-    # Create a memory object for chat history
-    memory = ConversationBufferMemory(
-        memory_key="chat_history",
-        return_messages=True
+    # Initialize the LLM with explicit API key
+    llm = ChatOpenAI(
+        temperature=0.7, 
+        model_name="gpt-4",
+        openai_api_key=openai_api_key
     )
 
-    # Create retriever
+    # Create the retriever
     retriever = vectorstore.as_retriever()
 
-    # Create the chat prompt template
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", "Answer the user's question based on the following context:\n\n{context}"),
-        ("user", "{input}")
-    ])
+    # Create prompt template
+    prompt = ChatPromptTemplate.from_template("""Answer the following question based on the provided context:
+
+Context: {context}
+
+Question: {question}
+
+Answer the question in a helpful and informative way. If you cannot answer the question based on the context, say so.""")
+
+    # Create document chain
+    document_chain = create_stuff_documents_chain(llm, prompt)
 
     # Create retrieval chain
-    retrieval_chain = create_retrieval_chain(
-        retriever,
-        combine_docs_chain=create_history_aware_retriever(llm, prompt)
-    )
+    retrieval_chain = RunnablePassthrough.assign(
+        context=lambda x: retriever.get_relevant_documents(x["question"])
+    ) | document_chain
 
     return retrieval_chain
 
-@app.route('/chat', methods=['POST'])
-@login_required
-def chat():
-    data = request.json
-    question = data.get('question')
-    
-    try:
-        response = retrieval_chain.invoke({
-            "input": question,
-            "chat_history": []  # You can maintain chat history if needed
-        })
-        
-        return jsonify({
-            "answer": response['answer'],
-            "success": True
-        })
-    except Exception as e:
-        return jsonify({
-            "error": str(e),
-            "success": False
-        })
+# Login decorator
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'username' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
-# Routes
 @app.route('/')
 @login_required
 def index():
@@ -166,10 +167,19 @@ def chat():
     data = request.json
     question = data.get('question')
     
-    try:
-        response = qa_chain({"question": question})
+    if not question:
         return jsonify({
-            "answer": response['answer'],
+            "error": "No question provided",
+            "success": False
+        })
+    
+    try:
+        response = retrieval_chain.invoke({
+            "question": question
+        })
+        
+        return jsonify({
+            "answer": response,
             "success": True
         })
     except Exception as e:
@@ -179,6 +189,14 @@ def chat():
         })
 
 if __name__ == '__main__':
-    init_db()
-    retrieval_chain = initialize_rag()
-    app.run(debug=True)
+    # Verify everything is set up correctly before starting
+    try:
+        init_db()
+        print("Database initialized successfully")
+        
+        retrieval_chain = initialize_rag()
+        print("RAG system initialized successfully")
+        
+        app.run(debug=True)
+    except Exception as e:
+        print(f"Error during initialization: {str(e)}")
