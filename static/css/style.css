@@ -1,0 +1,108 @@
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Chat message styles */
+.message {
+    padding: 1rem;
+    margin: 0.5rem 0;
+    border-radius: 0.5rem;
+    max-width: 80%;
+}
+
+.user-message {
+    background-color: #e3f2fd;
+    margin-left: auto;
+    margin-right: 1rem;
+}
+
+.bot-message {
+    background-color: #f5f5f5;
+    margin-right: auto;
+    margin-left: 1rem;
+}
+
+/* Loading animation */
+.loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.loading-dots {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.loading-dots div {
+    width: 0.5rem;
+    height: 0.5rem;
+    background-color: #888;
+    border-radius: 50%;
+    animation: bounce 1.4s infinite ease-in-out both;
+}
+
+.loading-dots div:nth-child(1) {
+    animation-delay: -0.32s;
+}
+
+.loading-dots div:nth-child(2) {
+    animation-delay: -0.16s;
+}
+
+@keyframes bounce {
+    0%, 80%, 100% { 
+        transform: scale(0);
+    }
+    40% { 
+        transform: scale(1.0);
+    }
+}
+
+/* Chat history item hover effect */
+.chat-history-item {
+    transition: all 0.2s ease-in-out;
+}
+
+.chat-history-item:hover {
+    background-color: #f3f4f6;
+    transform: translateX(4px);
+}
+
+/* Template button hover effect */
+.template-button {
+    transition: all 0.2s ease-in-out;
+}
+
+.template-button:hover {
+    background-color: #e5e7eb;
+    transform: translateY(-1px);
+}
+
+/* Custom styles for the input area */
+.input-area {
+    background-color: white;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.05);
+}
+
+/* Responsive design adjustments */
+@media (max-width: 640px) {
+    .message {
+        max-width: 90%;
+    }
+}
