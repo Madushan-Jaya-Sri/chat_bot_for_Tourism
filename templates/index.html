@@ -3,7 +3,7 @@
 {% block content %}
 <div class="flex h-screen bg-gray-100">
     <!-- Sidebar -->
-    <div class="w-72 bg-gray-800 text-white p-4 flex flex-col">
+    <div class="w-72 bg-gray-800 text-white p-4 flex flex-col" style="border-radius: 10px;">
         <!-- New Chat Button -->
         <button onclick="newChat()" class="w-full bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg mb-4 flex items-center justify-center transition-colors duration-200">
             <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -34,14 +34,16 @@
     <!-- Main Chat Area -->
     <div class="flex-1 flex flex-col">
         <!-- Header -->
-        <div class="bg-white shadow-sm p-4 flex items-center">
+        <!-- <div class="bg-white shadow-sm p-4 flex items-center">
             <h1 class="text-xl font-semibold text-gray-800">Tourism Assistant</h1>
-        </div>
+        </div> -->
 
         <!-- Chat Messages -->
         <div id="chatMessages" class="flex-1 p-6 overflow-y-auto space-y-4">
             <!-- Initial Templates -->
-            <div id="initialTemplates" class="h-full flex items-center justify-center">
+            <img src="{{ url_for('static', filename='images/logo.jpg') }}" alt="Tourism Assistant" class="mx-auto mb-6" style="max-width: 20%; height: 20%;">
+
+            <div id="initialTemplates" class="h-full flex items-center justify-center" style="height: 50%;">
                 <div class="text-center max-w-4xl w-full px-4">
                     <h1 class="text-3xl font-bold mb-8 text-gray-800">Welcome to Tourism Assistant</h1>
                     

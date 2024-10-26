@@ -362,4 +362,4 @@ def logout():
 if __name__ == "__main__":
     init_db()
     qa_chain = init_rag()
-    app.run(debug=True)
+    app.run(debug=False)
