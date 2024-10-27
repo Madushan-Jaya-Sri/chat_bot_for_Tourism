@@ -1,5 +1,4 @@
 #!/bin/bash
-
 echo "Checking Python version..."
 python3 --version
 
