@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./static/pdfs:/app/static/pdfs
+      - ./database.db:/app/database.db
+    environment:
+      - FLASK_APP=app.py
+      - FLASK_ENV=production
+    restart: always
+    user: "${UID:-1000}:${GID:-1000}"  # This helps with permissions
